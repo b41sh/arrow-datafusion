@@ -16,6 +16,7 @@
 // under the License.
 
 //! Utilizing exact statistics from sources to avoid scanning data
+use std::collections::HashMap;
 use std::{sync::Arc, vec};
 
 use crate::{
@@ -55,12 +56,82 @@ impl OptimizerRule for AggregateStatistics {
                 // aggregations that can not be replaced
                 // using statistics
                 let mut agg = vec![];
+
+                // Schema {
+                //   fields: [
+                //     Field { name: "a", data_type: Int64,
+                //             nullable: true, dict_id: 0, dict_is_ordered: false, metadata: None },
+                //     Field { name: "b", data_type: Int64, nullable: true, dict_id: 0,
+                //             dict_is_ordered: false, metadata: None }],
+                //   metadata: {} }
+                // Statistics {
+                //   num_rows: Some(4),
+                //   total_byte_size: Some(230),
+                //   column_statistics:
+                //     Some([ColumnStatistics
+                //       { null_count: Some(0), max_value: Some(Int32(10)),
+                //         min_value: Some(Int32(1)), distinct_count: None },
+                //     ColumnStatistics {
+                //         null_count: Some(0), max_value: Some(Int32(10)),
+                //         min_value: Some(Int32(1)), distinct_count: None }]) }
+
+                let mut maxes = HashMap::new();
+                let mut mins = HashMap::new();
+
                 // expressions that can be replaced by constants
                 let mut projections = vec![];
                 if let Some(num_rows) = match input.as_ref() {
-                    LogicalPlan::TableScan { source, .. }
-                        if source.has_exact_statistics() =>
-                    {
+                    LogicalPlan::TableScan {
+                        table_name, source, ..
+                    } if source.has_exact_statistics() => {
+                        let schema = source.schema();
+                        let fields = schema.fields();
+
+                        let column_statistics = source.statistics().column_statistics;
+
+                        match column_statistics {
+                            Some(column_statistics) => {
+                                for (i, field) in fields.iter().enumerate() {
+                                    println!("field = {}", field);
+                                    println!("name = {}", field.name());
+                                    println!("data_type = {}", field.data_type());
+
+                                    match column_statistics[i].max_value.clone() {
+                                        Some(max_value) => {
+                                            let max_key = format!(
+                                                "{}.{}",
+                                                table_name,
+                                                field.name()
+                                            );
+                                            maxes.insert(max_key, max_value);
+                                        }
+                                        None => {}
+                                    }
+                                    match column_statistics[i].min_value.clone() {
+                                        Some(min_value) => {
+                                            let min_key = format!(
+                                                "{}.{}",
+                                                table_name,
+                                                field.name()
+                                            );
+                                            mins.insert(min_key, min_value);
+                                        }
+                                        None => {}
+                                    }
+                                }
+                            }
+                            None => {}
+                        }
+
+                        println!("----------------");
+
+                        println!("table_name={:?}", table_name);
+                        println!("schema={:?}", source.schema());
+                        println!("statistics={:?}", source.statistics());
+
+                        println!("=======================");
+                        println!("maxes={:?}", maxes);
+
                         source.statistics().num_rows
                     }
                     _ => None,
@@ -80,6 +151,46 @@ impl OptimizerRule for AggregateStatistics {
                                     )))),
                                     "COUNT(Uint8(1))".to_string(),
                                 ));
+                            }
+
+                            Expr::AggregateFunction {
+                                fun: AggregateFunction::Max,
+                                args,
+                                distinct: false,
+                            } => {
+                                println!("args={:?}", args);
+
+                                println!("==11111=====================");
+                                println!("maxes={:?}", maxes);
+
+                                match &args[0] {
+                                    Expr::Column(c) => {
+                                        println!("column flat_name={:?}", c.flat_name());
+                                        //println!("column name={:?}", c.name());
+                                        //println!("column index={:?}", c.index());
+
+                                        match maxes.get(&c.flat_name()) {
+                                            Some(max_value) => {
+                                                println!("max_value---={:?}", max_value);
+
+                                                projections.push(Expr::Alias(
+                                                    Box::new(Expr::Literal(
+                                                        max_value.clone(),
+                                                    )),
+                                                    "MAX(Uint8(1))".to_string(),
+                                                ));
+
+                                                agg.push(expr.clone());
+                                            }
+                                            None => {
+                                                agg.push(expr.clone());
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        agg.push(expr.clone());
+                                    }
+                                }
                             }
                             _ => {
                                 agg.push(expr.clone());

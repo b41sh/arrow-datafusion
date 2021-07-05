@@ -192,8 +192,8 @@ impl ParquetExec {
                 .iter()
                 .map(|null_count| ColumnStatistics {
                     null_count: Some(*null_count as usize),
-                    max_value: None,
-                    min_value: None,
+                    max_value: Some(ScalarValue::Int32(Some(10))),
+                    min_value: Some(ScalarValue::Int32(Some(1))),
                     distinct_count: None,
                 })
                 .collect();
@@ -289,8 +289,8 @@ impl ParquetExec {
                     .map(|null_count| ColumnStatistics {
                         null_count: Some(*null_count),
                         distinct_count: None,
-                        max_value: None,
-                        min_value: None,
+                        max_value: Some(ScalarValue::Int32(Some(10))),
+                        min_value: Some(ScalarValue::Int32(Some(1))),
                     })
                     .collect(),
             )
@@ -331,6 +331,8 @@ impl ParquetExec {
 
     /// Statistics for the data set (sum of statistics for all partitions)
     pub fn statistics(&self) -> &Statistics {
+        println!("-------");
+        println!("----aaabbb-------");
         &self.statistics
     }
 }
