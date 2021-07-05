@@ -167,7 +167,124 @@ impl ParquetExec {
                     schemas.push(schema);
                     null_counts = vec![0; num_fields]
                 }
+
+/**
+#[derive(Debug, Clone)]
+pub struct ParquetMetaData {
+    file_metadata: FileMetaData,
+    row_groups: Vec<RowGroupMetaData>,
+}
+#[derive(Debug, Clone)]
+pub struct RowGroupMetaData {
+    columns: Vec<ColumnChunkMetaData>,
+    num_rows: i64,
+    total_byte_size: i64,
+    schema_descr: SchemaDescPtr,
+}
+/// Metadata for a column chunk.
+#[derive(Debug, Clone)]
+pub struct ColumnChunkMetaData {
+    column_type: Type,
+    column_path: ColumnPath,
+    column_descr: ColumnDescPtr,
+    encodings: Vec<Encoding>,
+    file_path: Option<String>,
+    file_offset: i64,
+    num_values: i64,
+    compression: Compression,
+    total_compressed_size: i64,
+    total_uncompressed_size: i64,
+    data_page_offset: i64,
+    index_page_offset: Option<i64>,
+    dictionary_page_offset: Option<i64>,
+    statistics: Option<Statistics>,
+}
+/// Statistics for a column chunk and data page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statistics {
+    Boolean(TypedStatistics<BoolType>),
+    Int32(TypedStatistics<Int32Type>),
+    Int64(TypedStatistics<Int64Type>),
+    Int96(TypedStatistics<Int96Type>),
+    Float(TypedStatistics<FloatType>),
+    Double(TypedStatistics<DoubleType>),
+    ByteArray(TypedStatistics<ByteArrayType>),
+    FixedLenByteArray(TypedStatistics<FixedLenByteArrayType>),
+}
+/// Typed implementation for [`Statistics`].
+#[derive(Clone)]
+pub struct TypedStatistics<T: DataType> {
+    min: Option<T::T>,
+    max: Option<T::T>,
+    // Distinct count could be omitted in some cases
+    distinct_count: Option<u64>,
+    null_count: u64,
+    is_min_max_deprecated: bool,
+}
+    /// Returns min value of the statistics.
+    ///
+    /// Panics if min value is not set, e.g. all values are `null`.
+    /// Use `has_min_max_set` method to check that.
+    pub fn min(&self) -> &T::T {
+        self.min.as_ref().unwrap()
+    }
+
+    /// Returns max value of the statistics.
+    ///
+    /// Panics if max value is not set, e.g. all values are `null`.
+    /// Use `has_min_max_set` method to check that.
+    pub fn max(&self) -> &T::T {
+        self.max.as_ref().unwrap()
+    }
+*/
+
+
+
                 for row_group_meta in meta_data.row_groups() {
+
+                    for column_metadata in row_group_meta.columns() {
+                        match column_metadata.statistics() {
+                            Some(statistics) => {
+                                match statistics {
+                                    ParquetStatistics::Boolean(bool_statistics) => {
+                                        println!("max={:?}", bool_statistics.max());
+                                        println!("min={:?}", bool_statistics.min());
+                                    }
+                                    ParquetStatistics::Int32(int32_statistics) => {
+                                        println!("max={:?}", int32_statistics.max());
+                                        println!("min={:?}", int32_statistics.min());
+                                    }
+                                    ParquetStatistics::Int64(int64_statistics) => {
+                                        println!("max={:?}", int64_statistics.max());
+                                        println!("min={:?}", int64_statistics.min());
+                                    }
+                                    ParquetStatistics::Int96(int96_statistics) => {
+                                        println!("max={:?}", int96_statistics.max());
+                                        println!("min={:?}", int96_statistics.min());
+                                    }
+                                    ParquetStatistics::Float(f_statistics) => {
+                                        println!("max={:?}", f_statistics.max());
+                                        println!("min={:?}", f_statistics.min());
+                                    }
+                                    ParquetStatistics::Double(d_statistics) => {
+                                        println!("max={:?}", d_statistics.max());
+                                        println!("min={:?}", d_statistics.min());
+                                    }
+                                    ParquetStatistics::ByteArray(b_statistics) => {
+                                        println!("max={:?}", b_statistics.max());
+                                        println!("min={:?}", b_statistics.min());
+                                    }
+                                    ParquetStatistics::FixedLenByteArray(fl_statistics) => {
+                                        println!("max={:?}", fl_statistics.max());
+                                        println!("min={:?}", fl_statistics.min());
+                                    }
+                                }
+
+                            }
+                            None => {}
+                        }
+                    }
+
                     num_rows += row_group_meta.num_rows();
                     total_byte_size += row_group_meta.total_byte_size();
 
