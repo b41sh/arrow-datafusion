@@ -149,6 +149,8 @@ impl ParquetExec {
         let mut num_rows = 0;
         let mut total_byte_size = 0;
         let mut null_counts = Vec::new();
+        let mut maxes: Vec<Option<ScalarValue>> = Vec::new();
+        let mut mins: Vec<Option<ScalarValue>> = Vec::new();
         let mut limit_exhausted = false;
         for chunk in chunks {
             let mut filenames: Vec<String> =
@@ -165,7 +167,9 @@ impl ParquetExec {
                 let num_fields = schema.fields().len();
                 if schemas.is_empty() || schema != schemas[0] {
                     schemas.push(schema);
-                    null_counts = vec![0; num_fields]
+                    null_counts = vec![0; num_fields];
+                    maxes = vec![None; num_fields];
+                    mins = vec![None; num_fields]
                 }
 
 /**
@@ -298,6 +302,90 @@ pub struct TypedStatistics<T: DataType> {
                     for (i, cnt) in columns_null_counts.enumerate() {
                         null_counts[i] += cnt
                     }
+
+                    let columns_maxes = row_group_meta
+                        .columns()
+                        .iter()
+                        .flat_map(|c| c.statistics().map(|stats| {
+
+
+                                match stats {
+                                    ParquetStatistics::Boolean(bool_statistics) => {
+                                        Some(ScalarValue::Boolean(Some(*bool_statistics.max())))
+                                    }
+                                    ParquetStatistics::Int32(int32_statistics) => {
+                                        Some(ScalarValue::Int32(Some(*int32_statistics.max())))
+                                    }
+                                    ParquetStatistics::Int64(int64_statistics) => {
+                                        Some(ScalarValue::Int64(Some(*int64_statistics.max())))
+                                    }
+                                    ParquetStatistics::Float(f_statistics) => {
+                                        Some(ScalarValue::Float32(Some(*f_statistics.max())))
+                                    }
+                                    ParquetStatistics::Double(d_statistics) => {
+                                        Some(ScalarValue::Float64(Some(*d_statistics.max())))
+                                    }
+                                    _ => None
+                                }
+
+                        }));
+
+                    let columns_mins = row_group_meta
+                        .columns()
+                        .iter()
+                        .flat_map(|c| c.statistics().map(|stats| {
+
+                                match stats {
+                                    ParquetStatistics::Boolean(bool_statistics) => {
+                                        Some(ScalarValue::Boolean(Some(*bool_statistics.min())))
+                                    }
+                                    ParquetStatistics::Int32(int32_statistics) => {
+                                        Some(ScalarValue::Int32(Some(*int32_statistics.min())))
+                                    }
+                                    ParquetStatistics::Int64(int64_statistics) => {
+                                        Some(ScalarValue::Int64(Some(*int64_statistics.min())))
+                                    }
+                                    ParquetStatistics::Float(f_statistics) => {
+                                        Some(ScalarValue::Float32(Some(*f_statistics.min())))
+                                    }
+                                    ParquetStatistics::Double(d_statistics) => {
+                                        Some(ScalarValue::Float64(Some(*d_statistics.min())))
+                                    }
+                                    _ => None
+                                }
+                        }));
+
+                    println!("columns_maxes={:?}", columns_maxes);
+                    println!("columns_mins={:?}", columns_mins);
+
+
+                    for (_i, max) in columns_maxes.enumerate() {
+                        max.map(|max| {
+                            match max {
+                                ScalarValue::Boolean(Some(v)) => {
+                                    println!("v0={:?}", v)
+                                }
+                                ScalarValue::Int32(Some(v)) => {
+                                    println!("v0={:?}", v)
+                                }
+                                ScalarValue::Int64(Some(v)) => {
+                                    println!("v0={:?}", v)
+                                }
+                                ScalarValue::Float32(Some(v)) => {
+                                    println!("v0={:?}", v)
+                                }
+                                ScalarValue::Float64(Some(v)) => {
+                                    println!("v0={:?}", v)
+                                }
+                                _ => {
+                                    println!("----=111")
+                                }
+                            }
+                        });
+                    }
+
+
+
                     if limit.map(|x| num_rows >= x as i64).unwrap_or(false) {
                         limit_exhausted = true;
                         break;
