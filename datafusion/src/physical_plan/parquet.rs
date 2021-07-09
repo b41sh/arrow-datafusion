@@ -59,6 +59,9 @@ use crate::datasource::datasource::{ColumnStatistics, Statistics};
 use async_trait::async_trait;
 use futures::stream::{Stream, StreamExt};
 
+use crate::physical_plan::expressions::MaxAccumulator;
+use crate::physical_plan::Accumulator;
+
 /// Execution plan for scanning one or more Parquet partitions
 #[derive(Debug, Clone)]
 pub struct ParquetExec {
@@ -166,125 +169,164 @@ impl ParquetExec {
                 let schema = arrow_reader.get_schema()?;
                 let num_fields = schema.fields().len();
                 if schemas.is_empty() || schema != schemas[0] {
-                    schemas.push(schema);
+                    schemas.push(schema.clone());
                     null_counts = vec![0; num_fields];
                     maxes = vec![None; num_fields];
                     mins = vec![None; num_fields]
                 }
 
-/**
-#[derive(Debug, Clone)]
-pub struct ParquetMetaData {
-    file_metadata: FileMetaData,
-    row_groups: Vec<RowGroupMetaData>,
-}
-#[derive(Debug, Clone)]
-pub struct RowGroupMetaData {
-    columns: Vec<ColumnChunkMetaData>,
-    num_rows: i64,
-    total_byte_size: i64,
-    schema_descr: SchemaDescPtr,
-}
-/// Metadata for a column chunk.
-#[derive(Debug, Clone)]
-pub struct ColumnChunkMetaData {
-    column_type: Type,
-    column_path: ColumnPath,
-    column_descr: ColumnDescPtr,
-    encodings: Vec<Encoding>,
-    file_path: Option<String>,
-    file_offset: i64,
-    num_values: i64,
-    compression: Compression,
-    total_compressed_size: i64,
-    total_uncompressed_size: i64,
-    data_page_offset: i64,
-    index_page_offset: Option<i64>,
-    dictionary_page_offset: Option<i64>,
-    statistics: Option<Statistics>,
-}
-/// Statistics for a column chunk and data page.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Statistics {
-    Boolean(TypedStatistics<BoolType>),
-    Int32(TypedStatistics<Int32Type>),
-    Int64(TypedStatistics<Int64Type>),
-    Int96(TypedStatistics<Int96Type>),
-    Float(TypedStatistics<FloatType>),
-    Double(TypedStatistics<DoubleType>),
-    ByteArray(TypedStatistics<ByteArrayType>),
-    FixedLenByteArray(TypedStatistics<FixedLenByteArrayType>),
-}
-/// Typed implementation for [`Statistics`].
-#[derive(Clone)]
-pub struct TypedStatistics<T: DataType> {
-    min: Option<T::T>,
-    max: Option<T::T>,
-    // Distinct count could be omitted in some cases
-    distinct_count: Option<u64>,
-    null_count: u64,
-    is_min_max_deprecated: bool,
-}
-    /// Returns min value of the statistics.
-    ///
-    /// Panics if min value is not set, e.g. all values are `null`.
-    /// Use `has_min_max_set` method to check that.
-    pub fn min(&self) -> &T::T {
-        self.min.as_ref().unwrap()
-    }
+                let mut maxess = schema
+                    .fields()
+                    .iter()
+                    .map(|field| MaxAccumulator::try_new(field.data_type()))
+                    .collect::<Result<Vec<_>>>()?;
 
-    /// Returns max value of the statistics.
-    ///
-    /// Panics if max value is not set, e.g. all values are `null`.
-    /// Use `has_min_max_set` method to check that.
-    pub fn max(&self) -> &T::T {
-        self.max.as_ref().unwrap()
-    }
-*/
+                /**
+                    let arg_types = args
+                        .iter()
+                        .map(|e| e.data_type(input_schema))
+                        .collect::<Result<Vec<_>>>()?;
 
 
+                        Ok(Box::new(MaxAccumulator::try_new(&self.data_type)?))
 
+                use arrow::datatypes::{DataType, TimeUnit};
+
+
+                impl MaxAccumulator {
+                    /// new max accumulator
+                    pub fn try_new(datatype: &DataType) -> Result<Self> {
+                        Ok(Self {
+                            max: ScalarValue::try_from(datatype)?,
+                        })
+                    }
+                }
+
+                    #[inline]
+                    pub const fn data_type(&self) -> &DataType {
+                        &self.data_type
+                    }
+
+                use super::DataType;
+
+                #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+                pub struct Field {
+                    name: String,
+                    data_type: DataType,
+                    nullable: bool,
+                    dict_id: i64,
+                    dict_is_ordered: bool,
+                    /// A map of key-value pairs containing additional custom meta data.
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    metadata: Option<BTreeMap<String, String>>,
+                }
+
+
+                #[derive(Debug, Clone)]
+                pub struct ParquetMetaData {
+                    file_metadata: FileMetaData,
+                    row_groups: Vec<RowGroupMetaData>,
+                }
+                #[derive(Debug, Clone)]
+                pub struct RowGroupMetaData {
+                    columns: Vec<ColumnChunkMetaData>,
+                    num_rows: i64,
+                    total_byte_size: i64,
+                    schema_descr: SchemaDescPtr,
+                }
+                /// Metadata for a column chunk.
+                #[derive(Debug, Clone)]
+                pub struct ColumnChunkMetaData {
+                    column_type: Type,
+                    column_path: ColumnPath,
+                    column_descr: ColumnDescPtr,
+                    encodings: Vec<Encoding>,
+                    file_path: Option<String>,
+                    file_offset: i64,
+                    num_values: i64,
+                    compression: Compression,
+                    total_compressed_size: i64,
+                    total_uncompressed_size: i64,
+                    data_page_offset: i64,
+                    index_page_offset: Option<i64>,
+                    dictionary_page_offset: Option<i64>,
+                    statistics: Option<Statistics>,
+                }
+                /// Statistics for a column chunk and data page.
+                #[derive(Debug, Clone, PartialEq)]
+                pub enum Statistics {
+                    Boolean(TypedStatistics<BoolType>),
+                    Int32(TypedStatistics<Int32Type>),
+                    Int64(TypedStatistics<Int64Type>),
+                    Int96(TypedStatistics<Int96Type>),
+                    Float(TypedStatistics<FloatType>),
+                    Double(TypedStatistics<DoubleType>),
+                    ByteArray(TypedStatistics<ByteArrayType>),
+                    FixedLenByteArray(TypedStatistics<FixedLenByteArrayType>),
+                }
+                /// Typed implementation for [`Statistics`].
+                #[derive(Clone)]
+                pub struct TypedStatistics<T: DataType> {
+                    min: Option<T::T>,
+                    max: Option<T::T>,
+                    // Distinct count could be omitted in some cases
+                    distinct_count: Option<u64>,
+                    null_count: u64,
+                    is_min_max_deprecated: bool,
+                }
+                    /// Returns min value of the statistics.
+                    ///
+                    /// Panics if min value is not set, e.g. all values are `null`.
+                    /// Use `has_min_max_set` method to check that.
+                    pub fn min(&self) -> &T::T {
+                        self.min.as_ref().unwrap()
+                    }
+
+                    /// Returns max value of the statistics.
+                    ///
+                    /// Panics if max value is not set, e.g. all values are `null`.
+                    /// Use `has_min_max_set` method to check that.
+                    pub fn max(&self) -> &T::T {
+                        self.max.as_ref().unwrap()
+                    }
+                */
                 for row_group_meta in meta_data.row_groups() {
-
                     for column_metadata in row_group_meta.columns() {
                         match column_metadata.statistics() {
-                            Some(statistics) => {
-                                match statistics {
-                                    ParquetStatistics::Boolean(bool_statistics) => {
-                                        println!("max={:?}", bool_statistics.max());
-                                        println!("min={:?}", bool_statistics.min());
-                                    }
-                                    ParquetStatistics::Int32(int32_statistics) => {
-                                        println!("max={:?}", int32_statistics.max());
-                                        println!("min={:?}", int32_statistics.min());
-                                    }
-                                    ParquetStatistics::Int64(int64_statistics) => {
-                                        println!("max={:?}", int64_statistics.max());
-                                        println!("min={:?}", int64_statistics.min());
-                                    }
-                                    ParquetStatistics::Int96(int96_statistics) => {
-                                        println!("max={:?}", int96_statistics.max());
-                                        println!("min={:?}", int96_statistics.min());
-                                    }
-                                    ParquetStatistics::Float(f_statistics) => {
-                                        println!("max={:?}", f_statistics.max());
-                                        println!("min={:?}", f_statistics.min());
-                                    }
-                                    ParquetStatistics::Double(d_statistics) => {
-                                        println!("max={:?}", d_statistics.max());
-                                        println!("min={:?}", d_statistics.min());
-                                    }
-                                    ParquetStatistics::ByteArray(b_statistics) => {
-                                        println!("max={:?}", b_statistics.max());
-                                        println!("min={:?}", b_statistics.min());
-                                    }
-                                    ParquetStatistics::FixedLenByteArray(fl_statistics) => {
-                                        println!("max={:?}", fl_statistics.max());
-                                        println!("min={:?}", fl_statistics.min());
-                                    }
+                            Some(statistics) => match statistics {
+                                ParquetStatistics::Boolean(bool_statistics) => {
+                                    println!("max={:?}", bool_statistics.max());
+                                    println!("min={:?}", bool_statistics.min());
                                 }
-
-                            }
+                                ParquetStatistics::Int32(int32_statistics) => {
+                                    println!("max={:?}", int32_statistics.max());
+                                    println!("min={:?}", int32_statistics.min());
+                                }
+                                ParquetStatistics::Int64(int64_statistics) => {
+                                    println!("max={:?}", int64_statistics.max());
+                                    println!("min={:?}", int64_statistics.min());
+                                }
+                                ParquetStatistics::Int96(int96_statistics) => {
+                                    println!("max={:?}", int96_statistics.max());
+                                    println!("min={:?}", int96_statistics.min());
+                                }
+                                ParquetStatistics::Float(f_statistics) => {
+                                    println!("max={:?}", f_statistics.max());
+                                    println!("min={:?}", f_statistics.min());
+                                }
+                                ParquetStatistics::Double(d_statistics) => {
+                                    println!("max={:?}", d_statistics.max());
+                                    println!("min={:?}", d_statistics.min());
+                                }
+                                ParquetStatistics::ByteArray(b_statistics) => {
+                                    println!("max={:?}", b_statistics.max());
+                                    println!("min={:?}", b_statistics.min());
+                                }
+                                ParquetStatistics::FixedLenByteArray(fl_statistics) => {
+                                    println!("max={:?}", fl_statistics.max());
+                                    println!("min={:?}", fl_statistics.min());
+                                }
+                            },
                             None => {}
                         }
                     }
@@ -303,88 +345,97 @@ pub struct TypedStatistics<T: DataType> {
                         null_counts[i] += cnt
                     }
 
-                    let columns_maxes = row_group_meta
-                        .columns()
-                        .iter()
-                        .flat_map(|c| c.statistics().map(|stats| {
+                    row_group_meta.columns().iter().enumerate().map(|(i, c)| {
+                        c.statistics().map(|stats| match stats {
+                            ParquetStatistics::Boolean(bool_statistics) => maxess[i]
+                                .update(&[ScalarValue::Boolean(Some(
+                                    *bool_statistics.max(),
+                                ))]),
+                            ParquetStatistics::Int32(int32_statistics) => maxess[i]
+                                .update(&[ScalarValue::Int32(Some(
+                                    *int32_statistics.max(),
+                                ))]),
+                            ParquetStatistics::Int64(int64_statistics) => maxess[i]
+                                .update(&[ScalarValue::Int64(Some(
+                                    *int64_statistics.max(),
+                                ))]),
+                            ParquetStatistics::Float(f_statistics) => maxess[i].update(
+                                &[ScalarValue::Float32(Some(*f_statistics.max()))],
+                            ),
+                            ParquetStatistics::Double(d_statistics) => maxess[i].update(
+                                &[ScalarValue::Float64(Some(*d_statistics.max()))],
+                            ),
+                            _ => Ok({}),
+                        })
+                    });
 
+                    let columns_maxes = row_group_meta.columns().iter().flat_map(|c| {
+                        c.statistics().map(|stats| match stats {
+                            ParquetStatistics::Boolean(bool_statistics) => {
+                                Some(ScalarValue::Boolean(Some(*bool_statistics.max())))
+                            }
+                            ParquetStatistics::Int32(int32_statistics) => {
+                                Some(ScalarValue::Int32(Some(*int32_statistics.max())))
+                            }
+                            ParquetStatistics::Int64(int64_statistics) => {
+                                Some(ScalarValue::Int64(Some(*int64_statistics.max())))
+                            }
+                            ParquetStatistics::Float(f_statistics) => {
+                                Some(ScalarValue::Float32(Some(*f_statistics.max())))
+                            }
+                            ParquetStatistics::Double(d_statistics) => {
+                                Some(ScalarValue::Float64(Some(*d_statistics.max())))
+                            }
+                            _ => None,
+                        })
+                    });
 
-                                match stats {
-                                    ParquetStatistics::Boolean(bool_statistics) => {
-                                        Some(ScalarValue::Boolean(Some(*bool_statistics.max())))
-                                    }
-                                    ParquetStatistics::Int32(int32_statistics) => {
-                                        Some(ScalarValue::Int32(Some(*int32_statistics.max())))
-                                    }
-                                    ParquetStatistics::Int64(int64_statistics) => {
-                                        Some(ScalarValue::Int64(Some(*int64_statistics.max())))
-                                    }
-                                    ParquetStatistics::Float(f_statistics) => {
-                                        Some(ScalarValue::Float32(Some(*f_statistics.max())))
-                                    }
-                                    ParquetStatistics::Double(d_statistics) => {
-                                        Some(ScalarValue::Float64(Some(*d_statistics.max())))
-                                    }
-                                    _ => None
-                                }
-
-                        }));
-
-                    let columns_mins = row_group_meta
-                        .columns()
-                        .iter()
-                        .flat_map(|c| c.statistics().map(|stats| {
-
-                                match stats {
-                                    ParquetStatistics::Boolean(bool_statistics) => {
-                                        Some(ScalarValue::Boolean(Some(*bool_statistics.min())))
-                                    }
-                                    ParquetStatistics::Int32(int32_statistics) => {
-                                        Some(ScalarValue::Int32(Some(*int32_statistics.min())))
-                                    }
-                                    ParquetStatistics::Int64(int64_statistics) => {
-                                        Some(ScalarValue::Int64(Some(*int64_statistics.min())))
-                                    }
-                                    ParquetStatistics::Float(f_statistics) => {
-                                        Some(ScalarValue::Float32(Some(*f_statistics.min())))
-                                    }
-                                    ParquetStatistics::Double(d_statistics) => {
-                                        Some(ScalarValue::Float64(Some(*d_statistics.min())))
-                                    }
-                                    _ => None
-                                }
-                        }));
+                    let columns_mins = row_group_meta.columns().iter().flat_map(|c| {
+                        c.statistics().map(|stats| match stats {
+                            ParquetStatistics::Boolean(bool_statistics) => {
+                                Some(ScalarValue::Boolean(Some(*bool_statistics.min())))
+                            }
+                            ParquetStatistics::Int32(int32_statistics) => {
+                                Some(ScalarValue::Int32(Some(*int32_statistics.min())))
+                            }
+                            ParquetStatistics::Int64(int64_statistics) => {
+                                Some(ScalarValue::Int64(Some(*int64_statistics.min())))
+                            }
+                            ParquetStatistics::Float(f_statistics) => {
+                                Some(ScalarValue::Float32(Some(*f_statistics.min())))
+                            }
+                            ParquetStatistics::Double(d_statistics) => {
+                                Some(ScalarValue::Float64(Some(*d_statistics.min())))
+                            }
+                            _ => None,
+                        })
+                    });
 
                     println!("columns_maxes={:?}", columns_maxes);
                     println!("columns_mins={:?}", columns_mins);
 
-
                     for (_i, max) in columns_maxes.enumerate() {
-                        max.map(|max| {
-                            match max {
-                                ScalarValue::Boolean(Some(v)) => {
-                                    println!("v0={:?}", v)
-                                }
-                                ScalarValue::Int32(Some(v)) => {
-                                    println!("v0={:?}", v)
-                                }
-                                ScalarValue::Int64(Some(v)) => {
-                                    println!("v0={:?}", v)
-                                }
-                                ScalarValue::Float32(Some(v)) => {
-                                    println!("v0={:?}", v)
-                                }
-                                ScalarValue::Float64(Some(v)) => {
-                                    println!("v0={:?}", v)
-                                }
-                                _ => {
-                                    println!("----=111")
-                                }
+                        max.map(|max| match max {
+                            ScalarValue::Boolean(Some(v)) => {
+                                println!("v0={:?}", v)
+                            }
+                            ScalarValue::Int32(Some(v)) => {
+                                println!("v0={:?}", v)
+                            }
+                            ScalarValue::Int64(Some(v)) => {
+                                println!("v0={:?}", v)
+                            }
+                            ScalarValue::Float32(Some(v)) => {
+                                println!("v0={:?}", v)
+                            }
+                            ScalarValue::Float64(Some(v)) => {
+                                println!("v0={:?}", v)
+                            }
+                            _ => {
+                                println!("----=111")
                             }
                         });
                     }
-
-
 
                     if limit.map(|x| num_rows >= x as i64).unwrap_or(false) {
                         limit_exhausted = true;
@@ -393,10 +444,12 @@ pub struct TypedStatistics<T: DataType> {
                 }
             }
 
-            let column_stats = null_counts
-                .iter()
-                .map(|null_count| ColumnStatistics {
-                    null_count: Some(*null_count as usize),
+            //for n in 1..101 {
+            //}
+
+            let column_stats = (0..10)
+                .map(|i| ColumnStatistics {
+                    null_count: Some(null_counts[i] as usize),
                     max_value: Some(ScalarValue::Int32(Some(10))),
                     min_value: Some(ScalarValue::Int32(Some(1))),
                     distinct_count: None,
