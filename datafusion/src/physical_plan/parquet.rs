@@ -178,9 +178,8 @@ impl ParquetExec {
         let mut num_fields = 0;
         let mut total_byte_size = 0;
         let mut null_counts = Vec::new();
-        let mut maxes: Vec<MaxAccumulator> = Vec::new();
-        let mut mins: Vec<MinAccumulator> = Vec::new();
-
+        let mut max_values: Vec<MaxAccumulator> = Vec::new();
+        let mut min_values: Vec<MinAccumulator> = Vec::new();
         let mut limit_exhausted = false;
         for chunk in chunks {
             let mut filenames: Vec<String> =
@@ -197,22 +196,17 @@ impl ParquetExec {
                 if schemas.is_empty() || schema != schemas[0] {
                     num_fields = schema.fields().len();
                     null_counts = vec![0; num_fields];
-
-                    maxes = schema
+                    max_values = schema
                         .fields()
                         .iter()
                         .map(|field| MaxAccumulator::try_new(field.data_type()))
                         .collect::<Result<Vec<_>>>()?;
-
-                    mins = schema
+                    min_values = schema
                         .fields()
                         .iter()
                         .map(|field| MinAccumulator::try_new(field.data_type()))
                         .collect::<Result<Vec<_>>>()?;
                     schemas.push(schema);
-
-                    println!("maxes={:?}", maxes);
-                    println!("mins={:?}", mins);
                 }
 
                 for row_group_meta in meta_data.row_groups() {
@@ -233,20 +227,45 @@ impl ParquetExec {
                     for (i, column) in row_group_meta.columns().iter().enumerate() {
                         match column.statistics() {
                             Some(stat) => {
-                                println!("stat={:?}", stat);
                                 match stat {
-                                    ParquetStatistics::Int64(int64_statistics) => {
-                                        println!(
-                                            "int64_statistics.max={:?}",
-                                            int64_statistics.max()
-                                        );
-
-                                        maxes[i].update(&[ScalarValue::Int64(Some(
-                                            *int64_statistics.max(),
+                                    ParquetStatistics::Boolean(s) => {
+                                        max_values[i].update(&[ScalarValue::Boolean(Some(
+                                            *s.max(),
                                         ))])?;
-
-                                        mins[i].update(&[ScalarValue::Int64(Some(
-                                            *int64_statistics.min(),
+                                        min_values[i].update(&[ScalarValue::Boolean(Some(
+                                            *s.min(),
+                                        ))])?;
+                                    }
+                                    ParquetStatistics::Int32(s) => {
+                                        max_values[i].update(&[ScalarValue::Int32(Some(
+                                            *s.max(),
+                                        ))])?;
+                                        min_values[i].update(&[ScalarValue::Int32(Some(
+                                            *s.min(),
+                                        ))])?;
+                                    }
+                                    ParquetStatistics::Int64(s) => {
+                                        max_values[i].update(&[ScalarValue::Int64(Some(
+                                            *s.max(),
+                                        ))])?;
+                                        min_values[i].update(&[ScalarValue::Int64(Some(
+                                            *s.min(),
+                                        ))])?;
+                                    }
+                                    ParquetStatistics::Float(s) => {
+                                        max_values[i].update(&[ScalarValue::Float32(Some(
+                                            *s.max(),
+                                        ))])?;
+                                        min_values[i].update(&[ScalarValue::Float32(Some(
+                                            *s.min(),
+                                        ))])?;
+                                    }
+                                    ParquetStatistics::Double(s) => {
+                                        max_values[i].update(&[ScalarValue::Float64(Some(
+                                            *s.max(),
+                                        ))])?;
+                                        min_values[i].update(&[ScalarValue::Float64(Some(
+                                            *s.min(),
                                         ))])?;
                                     }
                                     _ => {}
@@ -255,10 +274,6 @@ impl ParquetExec {
                             _ => {}
                         }
                     }
-
-                    println!("after maxes={:?}", maxes);
-                    println!("after mins={:?}", mins);
-
                     if limit.map(|x| num_rows >= x as i64).unwrap_or(false) {
                         limit_exhausted = true;
                         break;
@@ -269,8 +284,8 @@ impl ParquetExec {
             let column_stats = (0..num_fields)
                 .map(|i| ColumnStatistics {
                     null_count: Some(null_counts[i] as usize),
-                    max_value: Some(maxes[i].evaluate().unwrap()),
-                    min_value: Some(mins[i].evaluate().unwrap()),
+                    max_value: max_values[i].evaluate().ok(),
+                    min_value: min_values[i].evaluate().ok(),
                     distinct_count: None,
                 })
                 .collect();
@@ -352,25 +367,19 @@ impl ParquetExec {
         let mut num_rows: Option<usize> = None;
         let mut total_byte_size: Option<usize> = None;
         let mut null_counts: Vec<usize> = vec![0; schema.fields().len()];
-        let mut has_null_counts = false;
-
-        let mut maxes = schema
+        let mut has_statistics = false;
+        let mut max_values = schema
             .fields()
             .iter()
             .map(|field| MaxAccumulator::try_new(field.data_type()))
             .collect::<Result<Vec<_>>>()
             .unwrap();
-
-        let mut mins = schema
+        let mut min_values = schema
             .fields()
             .iter()
             .map(|field| MinAccumulator::try_new(field.data_type()))
             .collect::<Result<Vec<_>>>()
             .unwrap();
-
-        println!("maxes={:?}", maxes);
-        println!("mins={:?}", mins);
-
         for part in &partitions {
             if let Some(n) = part.statistics.num_rows {
                 num_rows = Some(num_rows.unwrap_or(0) + n)
@@ -381,26 +390,24 @@ impl ParquetExec {
             if let Some(x) = &part.statistics.column_statistics {
                 let part_nulls: Vec<Option<usize>> =
                     x.iter().map(|c| c.null_count).collect();
-                has_null_counts = true;
+                has_statistics = true;
 
-                let part_maxes: Vec<Option<ScalarValue>> =
+                let part_max_values: Vec<Option<ScalarValue>> =
                     x.iter().map(|c| c.max_value.clone()).collect();
-                let part_mins: Vec<Option<ScalarValue>> =
+                let part_min_values: Vec<Option<ScalarValue>> =
                     x.iter().map(|c| c.min_value.clone()).collect();
 
                 for &i in projection.iter() {
                     null_counts[i] = part_nulls[i].unwrap_or(0);
-
-                    match part_maxes[i].clone() {
+                    match part_max_values[i].clone() {
                         Some(part_max) => {
-                            maxes[i].update(&[part_max]);
+                            max_values[i].update(&[part_max]).unwrap();
                         }
                         _ => {}
                     }
-
-                    match part_mins[i].clone() {
+                    match part_min_values[i].clone() {
                         Some(part_min) => {
-                            mins[i].update(&[part_min]);
+                            min_values[i].update(&[part_min]).unwrap();
                         }
                         _ => {}
                     }
@@ -408,13 +415,13 @@ impl ParquetExec {
             }
         }
 
-        let column_stats = if has_null_counts {
+        let column_stats = if has_statistics {
             Some(
                 (0..schema.fields().len())
                     .map(|i| ColumnStatistics {
                         null_count: Some(null_counts[i] as usize),
-                        max_value: Some(maxes[i].evaluate().unwrap()),
-                        min_value: Some(mins[i].evaluate().unwrap()),
+                        max_value: max_values[i].evaluate().ok(),
+                        min_value: min_values[i].evaluate().ok(),
                         distinct_count: None,
                     })
                     .collect(),
@@ -457,8 +464,6 @@ impl ParquetExec {
 
     /// Statistics for the data set (sum of statistics for all partitions)
     pub fn statistics(&self) -> &Statistics {
-        println!("-------");
-        println!("----aaabbb-------");
         &self.statistics
     }
 }
