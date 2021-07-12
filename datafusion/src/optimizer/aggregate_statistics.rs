@@ -180,7 +180,7 @@ impl OptimizerRule for AggregateStatistics {
                                                     "MAX(Uint8(1))".to_string(),
                                                 ));
 
-                                                agg.push(expr.clone());
+                                                //agg.push(expr.clone());
                                             }
                                             None => {
                                                 agg.push(expr.clone());

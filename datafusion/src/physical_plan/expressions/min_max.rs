@@ -300,6 +300,7 @@ fn max(lhs: &ScalarValue, rhs: &ScalarValue) -> Result<ScalarValue> {
     min_max!(lhs, rhs, max)
 }
 
+/// An accumulator to compute the max value
 #[derive(Debug)]
 pub struct MaxAccumulator {
     max: ScalarValue,
@@ -405,6 +406,7 @@ impl AggregateExpr for Min {
     }
 }
 
+/// An accumulator to compute the minimal value
 #[derive(Debug)]
 pub struct MinAccumulator {
     min: ScalarValue,
