@@ -67,36 +67,27 @@ impl OptimizerRule for AggregateStatistics {
                     } if source.has_exact_statistics() => {
                         let schema = source.schema();
                         let fields = schema.fields();
-                        let column_statistics = source.statistics().column_statistics;
-                        match column_statistics {
-                            Some(column_statistics) => {
-                                for (i, field) in fields.iter().enumerate() {
-                                    match column_statistics[i].max_value.clone() {
-                                        Some(max_value) => {
-                                            let max_key = format!(
-                                                "{}.{}",
-                                                table_name,
-                                                field.name()
-                                            );
-                                            max_values.insert(max_key, max_value);
-                                        }
-                                        None => {}
-                                    }
-                                    match column_statistics[i].min_value.clone() {
-                                        Some(min_value) => {
-                                            let min_key = format!(
-                                                "{}.{}",
-                                                table_name,
-                                                field.name()
-                                            );
-                                            min_values.insert(min_key, min_value);
-                                        }
-                                        None => {}
-                                    }
+                        if let Some(column_statistics) =
+                            source.statistics().column_statistics
+                        {
+                            for (i, field) in fields.iter().enumerate() {
+                                if let Some(max_value) =
+                                    column_statistics[i].max_value.clone()
+                                {
+                                    let max_key =
+                                        format!("{}.{}", table_name, field.name());
+                                    max_values.insert(max_key, max_value);
+                                }
+                                if let Some(min_value) =
+                                    column_statistics[i].min_value.clone()
+                                {
+                                    let min_key =
+                                        format!("{}.{}", table_name, field.name());
+                                    min_values.insert(min_key, min_value);
                                 }
                             }
-                            None => {}
                         }
+
                         source.statistics().num_rows
                     }
                     _ => None,
@@ -121,56 +112,44 @@ impl OptimizerRule for AggregateStatistics {
                                 fun: AggregateFunction::Max,
                                 args,
                                 distinct: false,
-                            } => {
-                                match &args[0] {
-                                    Expr::Column(c) => {
-                                        match max_values.get(&c.flat_name()) {
-                                            Some(max_value) => {
-                                                let name = format!("MAX({})", c.name);
-                                                projections.push(Expr::Alias(
-                                                    Box::new(Expr::Literal(
-                                                        max_value.clone(),
-                                                    )),
-                                                    name,
-                                                ));
-                                            }
-                                            None => {
-                                                agg.push(expr.clone());
-                                            }
-                                        }
+                            } => match &args[0] {
+                                Expr::Column(c) => match max_values.get(&c.flat_name()) {
+                                    Some(max_value) => {
+                                        let name = format!("MAX({})", c.name);
+                                        projections.push(Expr::Alias(
+                                            Box::new(Expr::Literal(max_value.clone())),
+                                            name,
+                                        ));
                                     }
-                                    _ => {
+                                    None => {
                                         agg.push(expr.clone());
                                     }
+                                },
+                                _ => {
+                                    agg.push(expr.clone());
                                 }
-                            }
+                            },
                             Expr::AggregateFunction {
                                 fun: AggregateFunction::Min,
                                 args,
                                 distinct: false,
-                            } => {
-                                match &args[0] {
-                                    Expr::Column(c) => {
-                                        match min_values.get(&c.flat_name()) {
-                                            Some(min_value) => {
-                                                let name = format!("MIN({})", c.name);
-                                                projections.push(Expr::Alias(
-                                                    Box::new(Expr::Literal(
-                                                        min_value.clone(),
-                                                    )),
-                                                    name,
-                                                ));
-                                            }
-                                            None => {
-                                                agg.push(expr.clone());
-                                            }
-                                        }
+                            } => match &args[0] {
+                                Expr::Column(c) => match min_values.get(&c.flat_name()) {
+                                    Some(min_value) => {
+                                        let name = format!("MIN({})", c.name);
+                                        projections.push(Expr::Alias(
+                                            Box::new(Expr::Literal(min_value.clone())),
+                                            name,
+                                        ));
                                     }
-                                    _ => {
+                                    None => {
                                         agg.push(expr.clone());
                                     }
+                                },
+                                _ => {
+                                    agg.push(expr.clone());
                                 }
-                            }
+                            },
                             _ => {
                                 agg.push(expr.clone());
                             }

@@ -225,53 +225,46 @@ impl ParquetExec {
                     }
 
                     for (i, column) in row_group_meta.columns().iter().enumerate() {
-                        match column.statistics() {
-                            Some(stat) => {
-                                match stat {
-                                    ParquetStatistics::Boolean(s) => {
-                                        max_values[i].update(&[ScalarValue::Boolean(Some(
-                                            *s.max(),
-                                        ))])?;
-                                        min_values[i].update(&[ScalarValue::Boolean(Some(
-                                            *s.min(),
-                                        ))])?;
-                                    }
-                                    ParquetStatistics::Int32(s) => {
-                                        max_values[i].update(&[ScalarValue::Int32(Some(
-                                            *s.max(),
-                                        ))])?;
-                                        min_values[i].update(&[ScalarValue::Int32(Some(
-                                            *s.min(),
-                                        ))])?;
-                                    }
-                                    ParquetStatistics::Int64(s) => {
-                                        max_values[i].update(&[ScalarValue::Int64(Some(
-                                            *s.max(),
-                                        ))])?;
-                                        min_values[i].update(&[ScalarValue::Int64(Some(
-                                            *s.min(),
-                                        ))])?;
-                                    }
-                                    ParquetStatistics::Float(s) => {
-                                        max_values[i].update(&[ScalarValue::Float32(Some(
-                                            *s.max(),
-                                        ))])?;
-                                        min_values[i].update(&[ScalarValue::Float32(Some(
-                                            *s.min(),
-                                        ))])?;
-                                    }
-                                    ParquetStatistics::Double(s) => {
-                                        max_values[i].update(&[ScalarValue::Float64(Some(
-                                            *s.max(),
-                                        ))])?;
-                                        min_values[i].update(&[ScalarValue::Float64(Some(
-                                            *s.min(),
-                                        ))])?;
-                                    }
-                                    _ => {}
+                        if let Some(stat) = column.statistics() {
+                            match stat {
+                                ParquetStatistics::Boolean(s) => {
+                                    max_values[i].update(&[ScalarValue::Boolean(
+                                        Some(*s.max()),
+                                    )])?;
+                                    min_values[i].update(&[ScalarValue::Boolean(
+                                        Some(*s.min()),
+                                    )])?;
                                 }
+                                ParquetStatistics::Int32(s) => {
+                                    max_values[i]
+                                        .update(&[ScalarValue::Int32(Some(*s.max()))])?;
+                                    min_values[i]
+                                        .update(&[ScalarValue::Int32(Some(*s.min()))])?;
+                                }
+                                ParquetStatistics::Int64(s) => {
+                                    max_values[i]
+                                        .update(&[ScalarValue::Int64(Some(*s.max()))])?;
+                                    min_values[i]
+                                        .update(&[ScalarValue::Int64(Some(*s.min()))])?;
+                                }
+                                ParquetStatistics::Float(s) => {
+                                    max_values[i].update(&[ScalarValue::Float32(
+                                        Some(*s.max()),
+                                    )])?;
+                                    min_values[i].update(&[ScalarValue::Float32(
+                                        Some(*s.min()),
+                                    )])?;
+                                }
+                                ParquetStatistics::Double(s) => {
+                                    max_values[i].update(&[ScalarValue::Float64(
+                                        Some(*s.max()),
+                                    )])?;
+                                    min_values[i].update(&[ScalarValue::Float64(
+                                        Some(*s.min()),
+                                    )])?;
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
                     if limit.map(|x| num_rows >= x as i64).unwrap_or(false) {
@@ -399,17 +392,11 @@ impl ParquetExec {
 
                 for &i in projection.iter() {
                     null_counts[i] = part_nulls[i].unwrap_or(0);
-                    match part_max_values[i].clone() {
-                        Some(part_max) => {
-                            max_values[i].update(&[part_max]).unwrap();
-                        }
-                        _ => {}
+                    if let Some(part_max) = part_max_values[i].clone() {
+                        max_values[i].update(&[part_max]).unwrap();
                     }
-                    match part_min_values[i].clone() {
-                        Some(part_min) => {
-                            min_values[i].update(&[part_min]).unwrap();
-                        }
-                        _ => {}
+                    if let Some(part_min) = part_min_values[i].clone() {
+                        min_values[i].update(&[part_min]).unwrap();
                     }
                 }
             }
