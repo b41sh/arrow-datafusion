@@ -175,6 +175,7 @@ impl ParquetExec {
         let filenames: Vec<String> = filenames.iter().map(|s| s.to_string()).collect();
         let chunks = split_files(&filenames, max_concurrency);
         let mut num_rows = 0;
+        let mut num_fields = 0;
         let mut total_byte_size = 0;
         let mut null_counts = Vec::new();
         let mut maxes: Vec<MaxAccumulator> = Vec::new();
@@ -193,12 +194,9 @@ impl ParquetExec {
                 let meta_data = arrow_reader.get_metadata();
                 // collect all the unique schemas in this data set
                 let schema = arrow_reader.get_schema()?;
-                let num_fields = schema.fields().len();
                 if schemas.is_empty() || schema != schemas[0] {
-                    schemas.push(schema.clone());
+                    num_fields = schema.fields().len();
                     null_counts = vec![0; num_fields];
-                    //maxes = vec![None; num_fields];
-                    //mins = vec![None; num_fields]
 
                     maxes = schema
                         .fields()
@@ -211,24 +209,11 @@ impl ParquetExec {
                         .iter()
                         .map(|field| MinAccumulator::try_new(field.data_type()))
                         .collect::<Result<Vec<_>>>()?;
-
+                    schemas.push(schema);
 
                     println!("maxes={:?}", maxes);
                     println!("mins={:?}", mins);
-
                 }
-
-/**
-                let mut maxess = schema
-                    .fields()
-                    .iter()
-                    .map(|field| MaxAccumulator::try_new(field.data_type()))
-                    .collect::<Result<Vec<_>>>()?;
-                    //.collect::<Vec<_>>();
-
-                println!("maxes={:?}", maxess);
-                println!("maxes={:?}", maxess);
-*/
 
                 for row_group_meta in meta_data.row_groups() {
                     num_rows += row_group_meta.num_rows();
@@ -245,24 +230,24 @@ impl ParquetExec {
                         null_counts[i] += cnt
                     }
 
-
                     for (i, column) in row_group_meta.columns().iter().enumerate() {
                         match column.statistics() {
                             Some(stat) => {
                                 println!("stat={:?}", stat);
                                 match stat {
                                     ParquetStatistics::Int64(int64_statistics) => {
-                                        println!("int64_statistics.max={:?}", int64_statistics.max());
+                                        println!(
+                                            "int64_statistics.max={:?}",
+                                            int64_statistics.max()
+                                        );
 
-                                        maxes[i]
-                                        .update(&[ScalarValue::Int64(Some(
+                                        maxes[i].update(&[ScalarValue::Int64(Some(
                                             *int64_statistics.max(),
-                                        ))]);
+                                        ))])?;
 
-                                        mins[i]
-                                        .update(&[ScalarValue::Int64(Some(
+                                        mins[i].update(&[ScalarValue::Int64(Some(
                                             *int64_statistics.min(),
-                                        ))]);
+                                        ))])?;
                                     }
                                     _ => {}
                                 }
@@ -271,81 +256,8 @@ impl ParquetExec {
                         }
                     }
 
-
-
-let col = row_group_meta.column(0);
-
-let stat = col.statistics();
-
-
-println!("col={:?}", col);
-println!("stat={:?}", stat);
-
-match stat {
-    Some(stat) => {
-            println!("stat={:?}", stat);
-        match stat {
-
-                            ParquetStatistics::Int64(int64_statistics) => {
-                                println!("int64_statistics.max={:?}", int64_statistics.max());
-
-
-                                maxes[0]
-                                .update(&[ScalarValue::Int64(Some(
-                                    *int64_statistics.max(),
-                                ))]);
-                            }
-                            _ => {}
-
-        }
-    }
-    _ => {}
-}
-
-
-
-                    row_group_meta.columns().iter().enumerate().map(|(i, c)| {
-                        c.statistics().map(|stats| match stats {
-                            ParquetStatistics::Boolean(bool_statistics) => maxes[i]
-                                .update(&[ScalarValue::Boolean(Some(
-                                    *bool_statistics.max(),
-                                ))]),
-                            ParquetStatistics::Int32(int32_statistics) => {
-                                println!("int32_statistics.max={:?}", int32_statistics.max());
-
-                                maxes[i].update(&[ScalarValue::Int32(Some(
-                                    *int32_statistics.max(),
-                                ))])
-                            }
-                            ParquetStatistics::Int64(int64_statistics) => {
-                                println!("int64_statistics.max={:?}", int64_statistics.max());
-
-
-                                maxes[i]
-                                .update(&[ScalarValue::Int64(Some(
-                                    *int64_statistics.max(),
-                                ))])
-                            }
-                            ParquetStatistics::Float(f_statistics) => maxes[i].update(
-                                &[ScalarValue::Float32(Some(*f_statistics.max()))],
-                            ),
-                            ParquetStatistics::Double(d_statistics) => maxes[i].update(
-                                &[ScalarValue::Float64(Some(*d_statistics.max()))],
-                            ),
-                            //_ => Ok({}),
-                            _ => {
-                                println!("errrrrrrr");
-                                Ok({})
-                            }
-                        })
-                    });
-
-
-                println!("after maxes={:?}", maxes);
-                println!("after mins={:?}", mins);
-
-
-
+                    println!("after maxes={:?}", maxes);
+                    println!("after mins={:?}", mins);
 
                     if limit.map(|x| num_rows >= x as i64).unwrap_or(false) {
                         limit_exhausted = true;
@@ -354,24 +266,7 @@ match stat {
                 }
             }
 
-/**
-            let column_stats = null_counts
-                .iter()
-                .map(|null_count| ColumnStatistics {
-                    null_count: Some(*null_count as usize),
-                    max_value: Some(ScalarValue::Int32(Some(10))),
-                    min_value: Some(ScalarValue::Int32(Some(1))),
-                    distinct_count: None,
-                })
-                .collect();
-*/
-
-            for i in 0..2 {
-                println!("final maxes={:?}", maxes[i].evaluate());
-                println!("final mins={:?}", mins[i].evaluate());
-            }
-
-            let column_stats = (0..2)
+            let column_stats = (0..num_fields)
                 .map(|i| ColumnStatistics {
                     null_count: Some(null_counts[i] as usize),
                     max_value: Some(maxes[i].evaluate().unwrap()),
@@ -379,21 +274,6 @@ match stat {
                     distinct_count: None,
                 })
                 .collect();
-
-
-/**
-            //for n in 1..101 {
-            //}
-
-            let column_stats = (0..10)
-                .map(|i| ColumnStatistics {
-                    null_count: Some(null_counts[i] as usize),
-                    max_value: Some(ScalarValue::Int32(Some(10))),
-                    min_value: Some(ScalarValue::Int32(Some(1))),
-                    distinct_count: None,
-                })
-                .collect();
-*/
 
             let statistics = Statistics {
                 num_rows: Some(num_rows as usize),
@@ -474,26 +354,22 @@ match stat {
         let mut null_counts: Vec<usize> = vec![0; schema.fields().len()];
         let mut has_null_counts = false;
 
-        let mut maxes: Vec<MaxAccumulator> = Vec::new();
-        let mut mins: Vec<MinAccumulator> = Vec::new();
+        let mut maxes = schema
+            .fields()
+            .iter()
+            .map(|field| MaxAccumulator::try_new(field.data_type()))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
 
-                    maxes = schema
-                        .fields()
-                        .iter()
-                        .map(|field| MaxAccumulator::try_new(field.data_type()))
-                        .collect::<Result<Vec<_>>>().unwrap();
+        let mut mins = schema
+            .fields()
+            .iter()
+            .map(|field| MinAccumulator::try_new(field.data_type()))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
 
-                    mins = schema
-                        .fields()
-                        .iter()
-                        .map(|field| MinAccumulator::try_new(field.data_type()))
-                        .collect::<Result<Vec<_>>>().unwrap();
-
-
-                    println!("maxes={:?}", maxes);
-                    println!("mins={:?}", mins);
-
-
+        println!("maxes={:?}", maxes);
+        println!("mins={:?}", mins);
 
         for part in &partitions {
             if let Some(n) = part.statistics.num_rows {
@@ -507,9 +383,10 @@ match stat {
                     x.iter().map(|c| c.null_count).collect();
                 has_null_counts = true;
 
-                let part_maxes: Vec<Option<ScalarValue>> = x.iter().map(|c| c.max_value.clone()).collect();
-                let part_mins: Vec<Option<ScalarValue>> = x.iter().map(|c| c.min_value.clone()).collect();
-
+                let part_maxes: Vec<Option<ScalarValue>> =
+                    x.iter().map(|c| c.max_value.clone()).collect();
+                let part_mins: Vec<Option<ScalarValue>> =
+                    x.iter().map(|c| c.min_value.clone()).collect();
 
                 for &i in projection.iter() {
                     null_counts[i] = part_nulls[i].unwrap_or(0);
@@ -527,42 +404,24 @@ match stat {
                         }
                         _ => {}
                     }
-
-
-
                 }
             }
-
-
-
-
-
-
-
-
         }
+
         let column_stats = if has_null_counts {
             Some(
-                null_counts
-                    .iter()
-                    .map(|null_count| ColumnStatistics {
-                        null_count: Some(*null_count),
+                (0..schema.fields().len())
+                    .map(|i| ColumnStatistics {
+                        null_count: Some(null_counts[i] as usize),
+                        max_value: Some(maxes[i].evaluate().unwrap()),
+                        min_value: Some(mins[i].evaluate().unwrap()),
                         distinct_count: None,
-                        //max_value: Some(ScalarValue::Int32(Some(10))),
-                        //min_value: Some(ScalarValue::Int32(Some(1))),
-                        max_value: Some(maxes[1].evaluate().unwrap()),
-                        min_value: Some(mins[1].evaluate().unwrap()),
                     })
                     .collect(),
             )
         } else {
             None
         };
-
-
-
-
-
 
         let statistics = Statistics {
             num_rows,

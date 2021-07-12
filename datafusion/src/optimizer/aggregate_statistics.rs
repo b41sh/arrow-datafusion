@@ -192,6 +192,49 @@ impl OptimizerRule for AggregateStatistics {
                                     }
                                 }
                             }
+
+                            Expr::AggregateFunction {
+                                fun: AggregateFunction::Min,
+                                args,
+                                distinct: false,
+                            } => {
+                                println!("args={:?}", args);
+                                println!("==2222=====================");
+                                println!("mins={:?}", mins);
+
+                                match &args[0] {
+                                    Expr::Column(c) => {
+                                        println!("column flat_name={:?}", c.flat_name());
+                                        //println!("column name={:?}", c.name());
+                                        //println!("column index={:?}", c.index());
+
+                                        match mins.get(&c.flat_name()) {
+                                            Some(min_value) => {
+                                                println!(
+                                                    "---min_value---={:?}",
+                                                    min_value
+                                                );
+
+                                                projections.push(Expr::Alias(
+                                                    Box::new(Expr::Literal(
+                                                        min_value.clone(),
+                                                    )),
+                                                    "MIN(Uint8(1))".to_string(),
+                                                ));
+
+                                                //agg.push(expr.clone());
+                                            }
+                                            None => {
+                                                agg.push(expr.clone());
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        agg.push(expr.clone());
+                                    }
+                                }
+                            }
+
                             _ => {
                                 agg.push(expr.clone());
                             }
