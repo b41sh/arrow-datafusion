@@ -111,15 +111,21 @@ impl OptimizerRule for AggregateStatistics {
                             Expr::AggregateFunction {
                                 fun: AggregateFunction::Max,
                                 args,
-                                distinct: false,
+                                ..
                             } => match &args[0] {
                                 Expr::Column(c) => match max_values.get(&c.flat_name()) {
                                     Some(max_value) => {
-                                        let name = format!("MAX({})", c.name);
-                                        projections.push(Expr::Alias(
-                                            Box::new(Expr::Literal(max_value.clone())),
-                                            name,
-                                        ));
+                                        if !max_value.is_null() {
+                                            let name = format!("MAX({})", c.name);
+                                            projections.push(Expr::Alias(
+                                                Box::new(Expr::Literal(
+                                                    max_value.clone(),
+                                                )),
+                                                name,
+                                            ));
+                                        } else {
+                                            agg.push(expr.clone());
+                                        }
                                     }
                                     None => {
                                         agg.push(expr.clone());
@@ -132,15 +138,21 @@ impl OptimizerRule for AggregateStatistics {
                             Expr::AggregateFunction {
                                 fun: AggregateFunction::Min,
                                 args,
-                                distinct: false,
+                                ..
                             } => match &args[0] {
                                 Expr::Column(c) => match min_values.get(&c.flat_name()) {
                                     Some(min_value) => {
-                                        let name = format!("MIN({})", c.name);
-                                        projections.push(Expr::Alias(
-                                            Box::new(Expr::Literal(min_value.clone())),
-                                            name,
-                                        ));
+                                        if !min_value.is_null() {
+                                            let name = format!("MIN({})", c.name);
+                                            projections.push(Expr::Alias(
+                                                Box::new(Expr::Literal(
+                                                    min_value.clone(),
+                                                )),
+                                                name,
+                                            ));
+                                        } else {
+                                            agg.push(expr.clone());
+                                        }
                                     }
                                     None => {
                                         agg.push(expr.clone());
