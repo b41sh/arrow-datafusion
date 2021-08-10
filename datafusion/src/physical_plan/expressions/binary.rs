@@ -35,8 +35,11 @@ use arrow::compute::kernels::comparison::{
     eq_utf8_scalar, gt_eq_utf8_scalar, gt_utf8_scalar, lt_eq_utf8_scalar, lt_utf8_scalar,
     neq_utf8_scalar,
 };
+use arrow::compute::kernels::regexp::regexp_match;
+//use arrow::datatypes::{DataType, Schema, TimeUnit, Field};
 use arrow::datatypes::{DataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+//use arrow::buffer::Buffer;
 
 use crate::error::{DataFusionError, Result};
 use crate::logical_plan::Operator;
@@ -160,6 +163,24 @@ macro_rules! compute_op {
             .downcast_ref::<$DT>()
             .expect("compute_op failed to downcast array");
         Ok(Arc::new($OP(&operand)?))
+    }};
+}
+
+macro_rules! regexp_compute_op {
+    // invoke binary operator
+    ($LEFT:expr, $RIGHT:expr, $OP:ident, $DT:ident) => {{
+        let ll = $LEFT
+            .as_any()
+            .downcast_ref::<$DT>()
+            .expect("compute_op failed to downcast array");
+        let rr = $RIGHT
+            .as_any()
+            .downcast_ref::<$DT>()
+            .expect("compute_op failed to downcast array");
+
+        let flags = StringArray::from(vec!["i"; 1]);
+        Ok($OP(&ll, &rr, Some(&flags))?)
+        //Ok($OP(&ll, &rr, None)?)
     }};
 }
 
@@ -339,6 +360,19 @@ macro_rules! boolean_op {
     }};
 }
 
+/// Invoke a boolean kernel on a pair of arrays
+macro_rules! regexp_op {
+    ($LEFT:expr, $RIGHT:expr, $OP:ident) => {{
+        match $LEFT.data_type() {
+            DataType::Utf8 => regexp_compute_op!($LEFT, $RIGHT, $OP, StringArray),
+            other => Err(DataFusionError::Internal(format!(
+                "Data type {:?} not supported for binary operation on primitive arrays",
+                other
+            ))),
+        }
+    }};
+}
+
 /// Coercion rules for all binary operators. Returns the output type
 /// of applying `op` to an argument of `lhs_type` and `rhs_type`.
 fn common_binary_type(
@@ -353,8 +387,11 @@ fn common_binary_type(
             (DataType::Boolean, DataType::Boolean) => Some(DataType::Boolean),
             _ => None,
         },
-        Operator::MatchRegular => match (lhs_type, rhs_type) {
-            (DataType::Utf8, DataType::Utf8) => Some(DataType::Boolean),
+        Operator::MatchRegular
+        | Operator::IMatchRegular
+        | Operator::NotMatchRegular
+        | Operator::NotIMatchRegular => match (lhs_type, rhs_type) {
+            (DataType::Utf8, DataType::Utf8) => Some(DataType::Utf8),
             _ => None,
         },
         // logical equality operators have their own rules, and always return a boolean
@@ -410,14 +447,19 @@ pub fn binary_operator_data_type(
         | Operator::Lt
         | Operator::Gt
         | Operator::GtEq
+        //| Operator::LtEq => Ok(DataType::Boolean),
         | Operator::LtEq
-        | Operator::MatchRegular => Ok(DataType::Boolean),
+        | Operator::MatchRegular
+        | Operator::IMatchRegular
+        | Operator::NotMatchRegular
+        | Operator::NotIMatchRegular => Ok(DataType::Boolean),
         // math operations return the same value as the common coerced type
         Operator::Plus
         | Operator::Minus
         | Operator::Divide
         | Operator::Multiply
         | Operator::Modulus => Ok(common_type),
+        //Operator::MatchRegular => Ok(DataType::List(Box::new(Field::new("item", DataType::Utf8, true)))),
     }
 }
 
@@ -480,9 +522,6 @@ impl PhysicalExpr for BinaryExpr {
                     Operator::Modulus => {
                         binary_primitive_array_op_scalar!(array, scalar.clone(), modulus)
                     }
-                    Operator::MatchRegular => {
-                        binary_string_array_op_scalar!(array, scalar.clone(), like)
-                    }
                     // if scalar operation is not supported - fallback to array implementation
                     _ => None,
                 }
@@ -522,7 +561,55 @@ impl PhysicalExpr for BinaryExpr {
         let result: Result<ArrayRef> = match &self.op {
             Operator::Like => binary_string_array_op!(left, right, like),
             Operator::NotLike => binary_string_array_op!(left, right, nlike),
-            Operator::MatchRegular => binary_string_array_op!(left, right, like),
+            Operator::MatchRegular | Operator::IMatchRegular => {
+                let array = regexp_op!(left, right, regexp_match)?;
+                let len = array.len();
+                let mut result = BooleanBufferBuilder::new(len);
+                if let Some(bitmap) = array.data().null_bitmap() {
+                    for i in 0..len {
+                        if bitmap.is_set(i) {
+                            result.append(true);
+                        } else {
+                            result.append(false);
+                        }
+                    }
+                }
+                let arr_data = ArrayData::new(
+                    DataType::Boolean,
+                    len,
+                    Some(0),
+                    None,
+                    0,
+                    vec![result.finish()],
+                    vec![],
+                );
+                Ok(make_array(arr_data))
+            }
+            Operator::NotMatchRegular | Operator::NotIMatchRegular => {
+                let array = regexp_op!(left, right, regexp_match)?;
+                let len = array.len();
+                let mut result = BooleanBufferBuilder::new(len);
+                if let Some(bitmap) = array.data().null_bitmap() {
+                    for i in 0..len {
+                        if bitmap.is_set(i) {
+                            result.append(false);
+                        } else {
+                            result.append(true);
+                        }
+                    }
+                }
+                let arr_data = ArrayData::new(
+                    DataType::Boolean,
+                    len,
+                    Some(0),
+                    None,
+                    0,
+                    vec![result.finish()],
+                    vec![],
+                );
+                Ok(make_array(arr_data))
+            }
+
             Operator::Lt => binary_array_op!(left, right, lt),
             Operator::LtEq => binary_array_op!(left, right, lt_eq),
             Operator::Gt => binary_array_op!(left, right, gt),
