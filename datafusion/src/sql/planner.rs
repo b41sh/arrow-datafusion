@@ -1252,6 +1252,7 @@ impl<'a, S: ContextProvider> SqlToRel<'a, S> {
                     BinaryOperator::Or => Ok(Operator::Or),
                     BinaryOperator::Like => Ok(Operator::Like),
                     BinaryOperator::NotLike => Ok(Operator::NotLike),
+                    BinaryOperator::PGMatchRegular => Ok(Operator::MatchRegular),
                     _ => Err(DataFusionError::NotImplemented(format!(
                         "Unsupported SQL binary operator {:?}",
                         op

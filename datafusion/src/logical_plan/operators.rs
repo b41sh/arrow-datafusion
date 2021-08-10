@@ -52,6 +52,8 @@ pub enum Operator {
     Like,
     /// Does not match a wildcard pattern
     NotLike,
+    /// Match regular
+    MatchRegular,
 }
 
 impl fmt::Display for Operator {
@@ -72,6 +74,7 @@ impl fmt::Display for Operator {
             Operator::Or => "OR",
             Operator::Like => "LIKE",
             Operator::NotLike => "NOT LIKE",
+            Operator::MatchRegular => "~",
         };
         write!(f, "{}", display)
     }

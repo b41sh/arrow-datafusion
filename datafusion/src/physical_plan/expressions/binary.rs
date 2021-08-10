@@ -353,6 +353,10 @@ fn common_binary_type(
             (DataType::Boolean, DataType::Boolean) => Some(DataType::Boolean),
             _ => None,
         },
+        Operator::MatchRegular => match (lhs_type, rhs_type) {
+            (DataType::Utf8, DataType::Utf8) => Some(DataType::Boolean),
+            _ => None,
+        },
         // logical equality operators have their own rules, and always return a boolean
         Operator::Eq | Operator::NotEq => eq_coercion(lhs_type, rhs_type),
         // "like" operators operate on strings and always return a boolean
@@ -406,7 +410,8 @@ pub fn binary_operator_data_type(
         | Operator::Lt
         | Operator::Gt
         | Operator::GtEq
-        | Operator::LtEq => Ok(DataType::Boolean),
+        | Operator::LtEq
+        | Operator::MatchRegular => Ok(DataType::Boolean),
         // math operations return the same value as the common coerced type
         Operator::Plus
         | Operator::Minus
@@ -475,6 +480,9 @@ impl PhysicalExpr for BinaryExpr {
                     Operator::Modulus => {
                         binary_primitive_array_op_scalar!(array, scalar.clone(), modulus)
                     }
+                    Operator::MatchRegular => {
+                        binary_string_array_op_scalar!(array, scalar.clone(), like)
+                    }
                     // if scalar operation is not supported - fallback to array implementation
                     _ => None,
                 }
@@ -514,6 +522,7 @@ impl PhysicalExpr for BinaryExpr {
         let result: Result<ArrayRef> = match &self.op {
             Operator::Like => binary_string_array_op!(left, right, like),
             Operator::NotLike => binary_string_array_op!(left, right, nlike),
+            Operator::MatchRegular => binary_string_array_op!(left, right, like),
             Operator::Lt => binary_array_op!(left, right, lt),
             Operator::LtEq => binary_array_op!(left, right, lt_eq),
             Operator::Gt => binary_array_op!(left, right, gt),
