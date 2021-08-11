@@ -36,10 +36,8 @@ use arrow::compute::kernels::comparison::{
     neq_utf8_scalar,
 };
 use arrow::compute::kernels::regexp::regexp_match;
-//use arrow::datatypes::{DataType, Schema, TimeUnit, Field};
 use arrow::datatypes::{DataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-//use arrow::buffer::Buffer;
 
 use crate::error::{DataFusionError, Result};
 use crate::logical_plan::Operator;
@@ -163,24 +161,6 @@ macro_rules! compute_op {
             .downcast_ref::<$DT>()
             .expect("compute_op failed to downcast array");
         Ok(Arc::new($OP(&operand)?))
-    }};
-}
-
-macro_rules! regexp_compute_op {
-    // invoke binary operator
-    ($LEFT:expr, $RIGHT:expr, $OP:ident, $DT:ident) => {{
-        let ll = $LEFT
-            .as_any()
-            .downcast_ref::<$DT>()
-            .expect("compute_op failed to downcast array");
-        let rr = $RIGHT
-            .as_any()
-            .downcast_ref::<$DT>()
-            .expect("compute_op failed to downcast array");
-
-        let flags = StringArray::from(vec!["i"; 1]);
-        Ok($OP(&ll, &rr, Some(&flags))?)
-        //Ok($OP(&ll, &rr, None)?)
     }};
 }
 
@@ -360,11 +340,55 @@ macro_rules! boolean_op {
     }};
 }
 
-/// Invoke a boolean kernel on a pair of arrays
-macro_rules! regexp_op {
-    ($LEFT:expr, $RIGHT:expr, $OP:ident) => {{
+/// Invoke a regexp_match kernel on a pair of arrays
+macro_rules! regexp_match_op {
+    ($LEFT:expr, $RIGHT:expr, $NOT:expr, $CASE:expr) => {{
         match $LEFT.data_type() {
-            DataType::Utf8 => regexp_compute_op!($LEFT, $RIGHT, $OP, StringArray),
+            DataType::Utf8 => {
+                let ll = $LEFT
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("compute_op failed to downcast array");
+                let rr = $RIGHT
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("compute_op failed to downcast array");
+
+                let array = match $CASE {
+                    true => regexp_match(&ll, &rr, Some(&StringArray::from(vec!["i"; ll.len()])))?,
+                    false => regexp_match(&ll, &rr, None)?,
+                };
+
+                let len = array.len();
+                let mut result = BooleanBufferBuilder::new(len);
+                if let Some(bitmap) = array.data().null_bitmap() {
+                    for i in 0..len {
+                        if bitmap.is_set(i) {
+                            if $NOT {
+                                result.append(false);
+                            } else {
+                                result.append(true);
+                            }
+                        } else {
+                            if $NOT {
+                                result.append(true);
+                            } else {
+                                result.append(false);
+                            }
+                        }
+                    }
+                }
+                let arr_data = ArrayData::new(
+                    DataType::Boolean,
+                    len,
+                    Some(0),
+                    None,
+                    0,
+                    vec![result.finish()],
+                    vec![],
+                );
+                Ok(make_array(arr_data))
+            }
             other => Err(DataFusionError::Internal(format!(
                 "Data type {:?} not supported for binary operation on primitive arrays",
                 other
@@ -447,7 +471,6 @@ pub fn binary_operator_data_type(
         | Operator::Lt
         | Operator::Gt
         | Operator::GtEq
-        //| Operator::LtEq => Ok(DataType::Boolean),
         | Operator::LtEq
         | Operator::MatchRegular
         | Operator::IMatchRegular
@@ -459,7 +482,6 @@ pub fn binary_operator_data_type(
         | Operator::Divide
         | Operator::Multiply
         | Operator::Modulus => Ok(common_type),
-        //Operator::MatchRegular => Ok(DataType::List(Box::new(Field::new("item", DataType::Utf8, true)))),
     }
 }
 
@@ -561,55 +583,6 @@ impl PhysicalExpr for BinaryExpr {
         let result: Result<ArrayRef> = match &self.op {
             Operator::Like => binary_string_array_op!(left, right, like),
             Operator::NotLike => binary_string_array_op!(left, right, nlike),
-            Operator::MatchRegular | Operator::IMatchRegular => {
-                let array = regexp_op!(left, right, regexp_match)?;
-                let len = array.len();
-                let mut result = BooleanBufferBuilder::new(len);
-                if let Some(bitmap) = array.data().null_bitmap() {
-                    for i in 0..len {
-                        if bitmap.is_set(i) {
-                            result.append(true);
-                        } else {
-                            result.append(false);
-                        }
-                    }
-                }
-                let arr_data = ArrayData::new(
-                    DataType::Boolean,
-                    len,
-                    Some(0),
-                    None,
-                    0,
-                    vec![result.finish()],
-                    vec![],
-                );
-                Ok(make_array(arr_data))
-            }
-            Operator::NotMatchRegular | Operator::NotIMatchRegular => {
-                let array = regexp_op!(left, right, regexp_match)?;
-                let len = array.len();
-                let mut result = BooleanBufferBuilder::new(len);
-                if let Some(bitmap) = array.data().null_bitmap() {
-                    for i in 0..len {
-                        if bitmap.is_set(i) {
-                            result.append(false);
-                        } else {
-                            result.append(true);
-                        }
-                    }
-                }
-                let arr_data = ArrayData::new(
-                    DataType::Boolean,
-                    len,
-                    Some(0),
-                    None,
-                    0,
-                    vec![result.finish()],
-                    vec![],
-                );
-                Ok(make_array(arr_data))
-            }
-
             Operator::Lt => binary_array_op!(left, right, lt),
             Operator::LtEq => binary_array_op!(left, right, lt_eq),
             Operator::Gt => binary_array_op!(left, right, gt),
@@ -643,6 +616,10 @@ impl PhysicalExpr for BinaryExpr {
                     )));
                 }
             }
+            Operator::MatchRegular => regexp_match_op!(left, right, false, false),
+            Operator::IMatchRegular => regexp_match_op!(left, right, false, true),
+            Operator::NotMatchRegular => regexp_match_op!(left, right, true, false),
+            Operator::NotIMatchRegular => regexp_match_op!(left, right, true, true),
         };
         result.map(|a| ColumnarValue::Array(a))
     }
