@@ -18,13 +18,11 @@
 # under the License.
 #
 
-# point to the old changelog in apache/arrow
-front-matter=For older versions, see [apache/arrow/CHANGELOG.md](https://github.com/apache/arrow/blob/master/CHANGELOG.md)\n
-# some issues are just documentation
-add-sections={"documentation":{"prefix":"**Documentation updates:**","labels":["documentation"]},"performance":{"prefix":"**Performance improvements:**","labels":["performance"]}}
-# uncomment to not show PRs. TBD if we shown them or not.
-#pull-requests=false
-# so that the component is shown associated with the issue
-issue-line-labels=sql
-exclude-labels=development-process,invalid
-breaking-labels=api change
+# Usage:
+# CHANGELOG_GITHUB_TOKEN=<TOKEN> ./update_change_log-ballista.sh
+
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_TOP_DIR="$(cd "${SOURCE_DIR}/../../" && pwd)"
+
+CURRENT_VER=$(grep version "${SOURCE_TOP_DIR}/ballista/rust/client/Cargo.toml" | head -n 1 | awk '{print $3}' | tr -d '"')
+${SOURCE_DIR}/update_change_log.sh ballista 4.0.0 "ballista-${CURRENT_VER}"
