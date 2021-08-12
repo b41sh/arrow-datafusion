@@ -673,74 +673,6 @@ mod tests {
         Arc::new(BinaryExpr::new(l, op, r))
     }
 
-/**
-    #[test]
-    fn binary_regexp_match() -> Result<()> {
-        let schema = Schema::new(vec![
-            Field::new("a", DataType::Utf8, false),
-            Field::new("b", DataType::Utf8, false),
-        ]);
-
-        let a = StringArray::from(vec!["abc"; 5]);
-        let b = StringArray::from(vec!["^a", "^A", "(b|d)", "(B|D)", "^(b|c)"]);
-
-        // expression: "'abc' ~ '^a'"
-        let matchRegular = binary_simple(col("a", &schema)?, Operator::MatchRegular, col("b", &schema)?);
-        let batch =
-            RecordBatch::try_new(Arc::new(schema), vec![Arc::new(a), Arc::new(b)])?;
-
-        let result = matchRegular.evaluate(&batch)?.into_array(batch.num_rows());
-        assert_eq!(result.len(), 5);
-
-        let expected = vec![true, false, true, false, false];
-        let result = result
-            .as_any()
-            .downcast_ref::<BooleanArray>()
-            .expect("failed to downcast to BooleanArray");
-        for (i, &expected_item) in expected.iter().enumerate().take(4) {
-            assert_eq!(result.value(i), expected_item);
-        }
-
-        Ok(())
-    }
-*/
-
-
-
-    //Operator::MatchRegular => regexp_match_op!(left, right, false, false),
-    //Operator::IMatchRegular => regexp_match_op!(left, right, false, true),
-    //Operator::NotMatchRegular => regexp_match_op!(left, right, true, false),
-    //Operator::NotIMatchRegular => regexp_match_op!(left, right, true, true),
-
-
-    #[test]
-    fn binary_regexp_match() -> Result<()> {
-        let schema = Schema::new(vec![
-            Field::new("a", DataType::Utf8, false),
-            Field::new("b", DataType::Utf8, false),
-        ]);
-
-        let a = StringArray::from(vec!["abc"; 5]);
-        let b = StringArray::from(vec!["^a", "^A", "(b|d)", "(B|D)", "^(b|c)"]);
-
-        let expected = BooleanArray::from(vec![true, false, true, false, false]);
-        apply_string_op(Arc::new(schema), a, b, Operator::MatchRegular, expected)?;
-/**
-        let expected = BooleanArray::from(vec![true, true, true, true, false]);
-        apply_string_op(Arc::new(schema), a.clone(), b.clone(), Operator::IMatchRegular, expected)?;
-
-        let expected = BooleanArray::from(vec![false, true, false, true, false]);
-        apply_string_op(Arc::new(schema), a.clone(), b.clone(), Operator::NotMatchRegular, expected)?;
-
-        let expected = BooleanArray::from(vec![false, false, false, false, true]);
-        apply_string_op(Arc::new(schema), a.clone(), b.clone(), Operator::NotIMatchRegular, expected)?;
-*/
-
-        Ok(())
-    }
-
-
-
     #[test]
     fn binary_comparison() -> Result<()> {
         let schema = Schema::new(vec![
@@ -801,6 +733,35 @@ mod tests {
         for (i, &expected_item) in expected.iter().enumerate().take(5) {
             assert_eq!(result.value(i), expected_item);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn binary_regexp_match() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Utf8, false),
+            Field::new("b", DataType::Utf8, false),
+        ]));
+
+        let a = Arc::new(StringArray::from(vec!["abc"; 5]));
+        let b = Arc::new(StringArray::from(vec!["^a", "^A", "(b|d)", "(B|D)", "^(b|c)"]));
+
+        // expression: "'abc' ~ '^a'"
+        let expected = BooleanArray::from(vec![true, false, true, false, false]);
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::MatchRegular, expected)?;
+
+        // expression: "'abc' ~* '^a'"
+        let expected = BooleanArray::from(vec![true, true, true, true, false]);
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::IMatchRegular, expected)?;
+
+        // expression: "'abc' !~ '^a'"
+        let expected = BooleanArray::from(vec![false, true, false, true, true]);
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::NotMatchRegular, expected)?;
+
+        // expression: "'abc' !~* '^a'"
+        let expected = BooleanArray::from(vec![false, false, false, false, true]);
+        apply_string_op(schema, vec![a, b], Operator::NotIMatchRegular, expected)?;
 
         Ok(())
     }
@@ -1183,16 +1144,13 @@ mod tests {
         Ok(())
     }
 
-
     fn apply_string_op(
         schema: SchemaRef,
-        left: StringArray,
-        right: StringArray,
+        data: Vec<ArrayRef>,
         op: Operator,
         expected: BooleanArray,
     ) -> Result<()> {
         let arithmetic_op = binary_simple(col("a", &schema)?, op, col("b", &schema)?);
-        let data: Vec<ArrayRef> = vec![Arc::new(left), Arc::new(right)];
         let batch = RecordBatch::try_new(schema, data)?;
         let result = arithmetic_op.evaluate(&batch)?.into_array(batch.num_rows());
 
