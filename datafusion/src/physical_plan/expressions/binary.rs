@@ -426,10 +426,10 @@ fn common_binary_type(
         | Operator::Modulus
         | Operator::Divide
         | Operator::Multiply => numerical_coercion(lhs_type, rhs_type),
-        Operator::MatchRegular
-        | Operator::IMatchRegular
-        | Operator::NotMatchRegular
-        | Operator::NotIMatchRegular => string_coercion(lhs_type, rhs_type),
+        Operator::RegexMatch
+        | Operator::RegexIMatch
+        | Operator::RegexNotMatch
+        | Operator::RegexNotIMatch => string_coercion(lhs_type, rhs_type),
     };
 
     // re-write the error message of failed coercions to include the operator's information
@@ -469,10 +469,10 @@ pub fn binary_operator_data_type(
         | Operator::Gt
         | Operator::GtEq
         | Operator::LtEq
-        | Operator::MatchRegular
-        | Operator::IMatchRegular
-        | Operator::NotMatchRegular
-        | Operator::NotIMatchRegular => Ok(DataType::Boolean),
+        | Operator::RegexMatch
+        | Operator::RegexIMatch
+        | Operator::RegexNotMatch
+        | Operator::RegexNotIMatch => Ok(DataType::Boolean),
         // math operations return the same value as the common coerced type
         Operator::Plus
         | Operator::Minus
@@ -613,10 +613,10 @@ impl PhysicalExpr for BinaryExpr {
                     )));
                 }
             }
-            Operator::MatchRegular => regexp_match_op!(left, right, false, false),
-            Operator::IMatchRegular => regexp_match_op!(left, right, false, true),
-            Operator::NotMatchRegular => regexp_match_op!(left, right, true, false),
-            Operator::NotIMatchRegular => regexp_match_op!(left, right, true, true),
+            Operator::RegexMatch => regexp_match_op!(left, right, false, false),
+            Operator::RegexIMatch => regexp_match_op!(left, right, false, true),
+            Operator::RegexNotMatch => regexp_match_op!(left, right, true, false),
+            Operator::RegexNotIMatch => regexp_match_op!(left, right, true, true),
         };
         result.map(|a| ColumnarValue::Array(a))
     }
@@ -749,19 +749,19 @@ mod tests {
 
         // expression: "'abc' ~ '^a'"
         let expected = BooleanArray::from(vec![true, false, true, false, false]);
-        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::MatchRegular, expected)?;
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::RegexMatch, expected)?;
 
         // expression: "'abc' ~* '^a'"
         let expected = BooleanArray::from(vec![true, true, true, true, false]);
-        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::IMatchRegular, expected)?;
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::RegexIMatch, expected)?;
 
         // expression: "'abc' !~ '^a'"
         let expected = BooleanArray::from(vec![false, true, false, true, true]);
-        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::NotMatchRegular, expected)?;
+        apply_string_op(schema.clone(), vec![a.clone(), b.clone()], Operator::RegexNotMatch, expected)?;
 
         // expression: "'abc' !~* '^a'"
         let expected = BooleanArray::from(vec![false, false, false, false, true]);
-        apply_string_op(schema, vec![a, b], Operator::NotIMatchRegular, expected)?;
+        apply_string_op(schema, vec![a, b], Operator::RegexNotIMatch, expected)?;
 
         Ok(())
     }
